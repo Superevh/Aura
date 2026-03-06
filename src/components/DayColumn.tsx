@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
 import { DayColumnWidth, Spacing, Radius } from '../theme';
 import { getTimeOfDay, minutesToTime } from '../utils/travelTime';
+import { useDragSource, useDropTarget } from '../hooks/useDragDrop';
 
 interface DayColumnProps {
   dayPlan: DayPlan;
@@ -22,11 +23,8 @@ interface DayColumnProps {
   onCardPress: (activity: Activity) => void;
   onCardLongPress: (activity: Activity) => void;
   onCardFlickDown: (activity: Activity) => void;
-  onCardDragStart?: (activity: Activity, x: number, y: number) => void;
-  isDragTarget?: boolean;
-  onDragEnter?: () => void;
-  onDragLeave?: () => void;
-  draggingActivityId?: string | null;
+  /** Called when an activity card is dropped onto this column */
+  onCardDrop: (activityId: string) => void;
   isActive?: boolean;
 }
 
@@ -49,21 +47,47 @@ function getDayGradient(activities: Activity[]): [string, string, string] {
   return TIME_GRADIENTS[tod] ?? TIME_GRADIENTS.morning;
 }
 
+// ─── Draggable card wrapper ────────────────────────────────────────────────────
+interface DraggableCardProps {
+  activity: Activity;
+  onPress: () => void;
+  onLongPress: () => void;
+  style?: object;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}
+
+function DraggableCard({ activity, onPress, onLongPress, style, onDragStart, onDragEnd }: DraggableCardProps) {
+  const dragRef = useDragSource(activity.id, onDragStart, onDragEnd);
+  return (
+    <View ref={dragRef}>
+      <TouchableOpacity onPress={onPress} onLongPress={onLongPress} activeOpacity={0.9}>
+        <ActivityCard activity={activity} onPress={onPress} onLongPress={onLongPress} style={style} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── DayColumn ────────────────────────────────────────────────────────────────
 export function DayColumn({
   dayPlan,
   travelSegments,
   onCardPress,
   onCardLongPress,
   onCardFlickDown,
-  onCardDragStart,
-  isDragTarget = false,
-  onDragEnter,
-  onDragLeave,
-  draggingActivityId,
+  onCardDrop,
   isActive = false,
 }: DayColumnProps) {
   const overfillAnim = useRef(new Animated.Value(0)).current;
   const gradient = getDayGradient(dayPlan.activities);
+  const [isDropTarget, setIsDropTarget] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  const dropRef = useDropTarget(
+    (id) => { onCardDrop(id); },
+    () => setIsDropTarget(true),
+    () => setIsDropTarget(false),
+  );
 
   React.useEffect(() => {
     if (dayPlan.isOverfilled) {
@@ -84,30 +108,30 @@ export function DayColumn({
     outputRange: ['rgba(244,162,74,0)', 'rgba(244,162,74,0.6)'],
   });
 
-  // Find travel segment between two activities
   function getSegment(fromId: string, toId: string): TravelSegment | undefined {
     return travelSegments.find((s) => s.fromId === fromId && s.toId === toId);
   }
 
   return (
     <Animated.View
-      // @ts-ignore – web-only mouse events
-      onMouseEnter={onDragEnter}
-      onMouseLeave={onDragLeave}
+      ref={dropRef}
       style={[
         styles.container,
         isActive && styles.activeColumn,
-        isDragTarget && styles.dragTargetColumn,
-        { borderColor: isDragTarget ? 'rgba(100,200,255,0.7)' : overfillBorder },
+        isDropTarget && styles.dropTargetColumn,
+        { borderColor: isDropTarget ? 'rgba(100,200,255,0.8)' : overfillBorder },
       ]}
     >
-      {/* Gradient background matching time-of-day */}
+      {/* Gradient background */}
       <LinearGradient
         colors={gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={StyleSheet.absoluteFillObject}
       />
+
+      {/* Drop target highlight overlay */}
+      {isDropTarget && <View style={styles.dropHighlight} pointerEvents="none" />}
 
       {/* Day header */}
       <View style={styles.header}>
@@ -134,7 +158,7 @@ export function DayColumn({
       >
         {dayPlan.activities.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Drag cards here</Text>
+            <Text style={styles.emptyText}>Drop cards here</Text>
           </View>
         ) : (
           dayPlan.activities.map((activity, idx) => {
@@ -146,27 +170,16 @@ export function DayColumn({
               ? (nextActivity.startTime ?? 0) - ((activity.startTime ?? 0) + activity.duration)
               : 999;
 
-            const isDraggingThis = activity.id === draggingActivityId;
             return (
               <View key={activity.id}>
-                <TouchableOpacity
+                <DraggableCard
+                  activity={activity}
+                  onPress={() => onCardPress(activity)}
                   onLongPress={() => onCardLongPress(activity)}
-                  onPressIn={(e) => {
-                    const x = e.nativeEvent?.pageX ?? 0;
-                    const y = e.nativeEvent?.pageY ?? 0;
-                    onCardDragStart?.(activity, x, y);
-                  }}
-                  activeOpacity={0.9}
-                  style={isDraggingThis ? { opacity: 0.3 } : undefined}
-                >
-                  <ActivityCard
-                    activity={activity}
-                    onPress={() => onCardPress(activity)}
-                    onLongPress={() => onCardLongPress(activity)}
-                    style={styles.card}
-                  />
-                </TouchableOpacity>
-
+                  style={styles.card}
+                  onDragStart={() => setDraggingId(activity.id)}
+                  onDragEnd={() => setDraggingId(null)}
+                />
                 {segment && (
                   <View style={styles.travelLineContainer}>
                     <TravelLine
@@ -198,8 +211,13 @@ const styles = StyleSheet.create({
   activeColumn: {
     borderColor: 'rgba(100, 100, 255, 0.4)',
   },
-  dragTargetColumn: {
-    backgroundColor: 'rgba(100, 200, 255, 0.06)',
+  dropTargetColumn: {
+    borderWidth: 2,
+  },
+  dropHighlight: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(100, 200, 255, 0.08)',
+    zIndex: 1,
   },
   header: {
     paddingHorizontal: 16,
