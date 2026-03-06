@@ -18,7 +18,7 @@ import { ActivityCard } from '../components/ActivityCard';
 import { Activity } from '../types';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
-import { DayColumnWidth, Spacing, Radius, DockHeight } from '../theme';
+import { DayColumnWidth, Spacing, Radius, DockHeight, CardDimensions } from '../theme';
 import { useAuraStore } from '../store/useAuraStore';
 import { VIBE_CONFIGS } from '../utils/vibeConfig';
 import { exportPlanToPDF } from '../services/exportService';
@@ -38,6 +38,61 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
   const [customDistrict, setCustomDistrict] = useState('');
   const [customDuration, setCustomDuration] = useState('60');
   const [isExporting, setIsExporting] = useState(false);
+
+  // Drag state
+  const dragRef = useRef<{ activity: Activity; startX: number; startY: number; active: boolean } | null>(null);
+  const hoverDayRef = useRef<number | null>(null);
+  const currentPlanRef = useRef(currentPlan);
+  const wasDraggingRef = useRef(false);
+  const [dragDisplay, setDragDisplay] = useState<{ activity: Activity; x: number; y: number } | null>(null);
+  const [hoverDayIndex, setHoverDayIndex] = useState<number | null>(null);
+
+  React.useEffect(() => { currentPlanRef.current = currentPlan; }, [currentPlan]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      if (!drag.active) {
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        if (Math.sqrt(dx * dx + dy * dy) > 6) {
+          drag.active = true;
+          (document.body.style as any).userSelect = 'none';
+        }
+      }
+      if (drag.active) {
+        setDragDisplay({ activity: drag.activity, x: e.clientX, y: e.clientY });
+      }
+    };
+
+    const handleMouseUp = () => {
+      const drag = dragRef.current;
+      if (drag?.active) {
+        wasDraggingRef.current = true;
+        setTimeout(() => { wasDraggingRef.current = false; }, 100);
+        const plan = currentPlanRef.current;
+        const hoverIdx = hoverDayRef.current;
+        if (hoverIdx !== null && plan) {
+          moveCardToDay(drag.activity.id, plan.days[hoverIdx].day);
+        }
+      }
+      dragRef.current = null;
+      hoverDayRef.current = null;
+      setDragDisplay(null);
+      setHoverDayIndex(null);
+      (document.body.style as any).userSelect = '';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   if (!currentPlan) return null;
 
@@ -164,14 +219,36 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
               key={dayPlan.day}
               dayPlan={dayPlan}
               travelSegments={currentPlan.travelSegments}
-              onCardPress={(a) => setSelectedActivity(a)}
+              onCardPress={(a) => { if (!wasDraggingRef.current) setSelectedActivity(a); }}
               onCardLongPress={handleCardLongPress}
               onCardFlickDown={(a) => moveCardToDock(a.id)}
+              onCardDragStart={(a, x, y) => { dragRef.current = { activity: a, startX: x, startY: y, active: false }; }}
+              isDragTarget={dragDisplay !== null && hoverDayIndex === idx}
+              onDragEnter={() => { if (dragRef.current?.active) { hoverDayRef.current = idx; setHoverDayIndex(idx); } }}
+              onDragLeave={() => { hoverDayRef.current = null; setHoverDayIndex(null); }}
+              draggingActivityId={dragDisplay?.activity.id}
               isActive={idx === useAuraStore.getState().activeDayIndex}
             />
           ))}
         </ScrollView>
       </SafeAreaView>
+
+      {/* Floating drag card */}
+      {dragDisplay && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: dragDisplay.x - CardDimensions.width / 2,
+            top: dragDisplay.y - CardDimensions.height * 0.25,
+            zIndex: 9999,
+            opacity: 0.88,
+            transform: [{ rotate: '3deg' }],
+          }}
+        >
+          <ActivityCard activity={dragDisplay.activity} onPress={() => {}} />
+        </View>
+      )}
 
       {/* The Dock */}
       <Dock

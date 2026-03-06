@@ -22,6 +22,11 @@ interface DayColumnProps {
   onCardPress: (activity: Activity) => void;
   onCardLongPress: (activity: Activity) => void;
   onCardFlickDown: (activity: Activity) => void;
+  onCardDragStart?: (activity: Activity, x: number, y: number) => void;
+  isDragTarget?: boolean;
+  onDragEnter?: () => void;
+  onDragLeave?: () => void;
+  draggingActivityId?: string | null;
   isActive?: boolean;
 }
 
@@ -50,6 +55,11 @@ export function DayColumn({
   onCardPress,
   onCardLongPress,
   onCardFlickDown,
+  onCardDragStart,
+  isDragTarget = false,
+  onDragEnter,
+  onDragLeave,
+  draggingActivityId,
   isActive = false,
 }: DayColumnProps) {
   const overfillAnim = useRef(new Animated.Value(0)).current;
@@ -81,10 +91,14 @@ export function DayColumn({
 
   return (
     <Animated.View
+      // @ts-ignore – web-only mouse events
+      onMouseEnter={onDragEnter}
+      onMouseLeave={onDragLeave}
       style={[
         styles.container,
         isActive && styles.activeColumn,
-        { borderColor: overfillBorder },
+        isDragTarget && styles.dragTargetColumn,
+        { borderColor: isDragTarget ? 'rgba(100,200,255,0.7)' : overfillBorder },
       ]}
     >
       {/* Gradient background matching time-of-day */}
@@ -132,11 +146,18 @@ export function DayColumn({
               ? (nextActivity.startTime ?? 0) - ((activity.startTime ?? 0) + activity.duration)
               : 999;
 
+            const isDraggingThis = activity.id === draggingActivityId;
             return (
               <View key={activity.id}>
                 <TouchableOpacity
                   onLongPress={() => onCardLongPress(activity)}
+                  onPressIn={(e) => {
+                    const x = e.nativeEvent?.pageX ?? 0;
+                    const y = e.nativeEvent?.pageY ?? 0;
+                    onCardDragStart?.(activity, x, y);
+                  }}
                   activeOpacity={0.9}
+                  style={isDraggingThis ? { opacity: 0.3 } : undefined}
                 >
                   <ActivityCard
                     activity={activity}
@@ -176,6 +197,9 @@ const styles = StyleSheet.create({
   },
   activeColumn: {
     borderColor: 'rgba(100, 100, 255, 0.4)',
+  },
+  dragTargetColumn: {
+    backgroundColor: 'rgba(100, 200, 255, 0.06)',
   },
   header: {
     paddingHorizontal: 16,
