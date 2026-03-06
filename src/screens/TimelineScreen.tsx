@@ -18,7 +18,7 @@ import { ActivityCard } from '../components/ActivityCard';
 import { Activity } from '../types';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
-import { DayColumnWidth, Spacing, Radius, DockHeight } from '../theme';
+import { DayColumnWidth, Spacing, Radius, DockHeight, CardDimensions } from '../theme';
 import { useAuraStore } from '../store/useAuraStore';
 import { VIBE_CONFIGS } from '../utils/vibeConfig';
 import { exportPlanToPDF } from '../services/exportService';
@@ -38,6 +38,108 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
   const [customDistrict, setCustomDistrict] = useState('');
   const [customDuration, setCustomDuration] = useState('60');
   const [isExporting, setIsExporting] = useState(false);
+
+  // ── Drag state ──────────────────────────────────────────────────────────────
+  // dragRef: mutable bag – never causes re-renders, safe in window handlers
+  const dragRef = useRef<{
+    activityId: string;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const scrollOffsetRef = useRef(0);
+  const currentPlanRef = useRef(currentPlan);
+  const isDraggingRef = useRef(false); // prevents long-press action sheet during a drag
+  const [dragDisplay, setDragDisplay] = useState<{ activity: Activity; x: number; y: number } | null>(null);
+  const [hoverDayIndex, setHoverDayIndex] = useState<number | null>(null);
+  const hoverDayRef = useRef<number | null>(null);
+
+  React.useEffect(() => { currentPlanRef.current = currentPlan; }, [currentPlan]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // ── mousedown ─────────────────────────────────────────────────────────────
+    // Uses raw DOM event so it fires BEFORE React Native Web's Responder
+    // system can call preventDefault() and kill the gesture.
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Walk up the DOM to find the card wrapper that has our nativeID
+      const cardEl = target.closest('[id^="activity-card-"]') as HTMLElement | null;
+      if (!cardEl) return;
+      const activityId = cardEl.id.replace('activity-card-', '');
+      dragRef.current = { activityId, startX: e.clientX, startY: e.clientY, active: false };
+    };
+
+    // ── mousemove ─────────────────────────────────────────────────────────────
+    const handleMouseMove = (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+
+      // Activate after 6px of movement (distinguishes drag from click)
+      if (!drag.active) {
+        const d = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+        if (d < 6) return;
+        drag.active = true;
+        isDraggingRef.current = true;
+        (document.body.style as any).userSelect = 'none';
+        // Find the activity object and show the floating card
+        const plan = currentPlanRef.current;
+        if (!plan) return;
+        const activity =
+          plan.dockActivities.find((a) => a.id === drag.activityId) ??
+          plan.days.flatMap((d) => d.activities).find((a) => a.id === drag.activityId);
+        if (activity) setDragDisplay({ activity, x: e.clientX, y: e.clientY });
+      }
+
+      if (drag.active) {
+        setDragDisplay((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : null));
+
+        // Determine which column is being hovered based purely on coordinates:
+        // column i occupies: x ∈ [Spacing.md + i*(DayColumnWidth+Spacing.md),
+        //                          Spacing.md + i*(DayColumnWidth+Spacing.md) + DayColumnWidth]
+        // in scroll-content space (clientX + scrollOffset).
+        const plan = currentPlanRef.current;
+        if (!plan) return;
+        const absX = e.clientX + scrollOffsetRef.current;
+        const stride = DayColumnWidth + Spacing.md;
+        const idx = Math.floor((absX - Spacing.md) / stride);
+        const colStart = Spacing.md + idx * stride;
+        const isInCol = absX >= colStart && absX <= colStart + DayColumnWidth;
+        const newHover = isInCol && idx >= 0 && idx < plan.days.length ? idx : null;
+        hoverDayRef.current = newHover;
+        setHoverDayIndex(newHover);
+      }
+    };
+
+    // ── mouseup ───────────────────────────────────────────────────────────────
+    const handleMouseUp = () => {
+      const drag = dragRef.current;
+      if (drag?.active) {
+        const plan = currentPlanRef.current;
+        const targetIdx = hoverDayRef.current;
+        if (plan && targetIdx !== null) {
+          moveCardToDay(drag.activityId, plan.days[targetIdx].day);
+        }
+      }
+      dragRef.current = null;
+      hoverDayRef.current = null;
+      setTimeout(() => { isDraggingRef.current = false; }, 50); // after onPress fires
+      setDragDisplay(null);
+      setHoverDayIndex(null);
+      (document.body.style as any).userSelect = '';
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+  // ────────────────────────────────────────────────────────────────────────────
 
   if (!currentPlan) return null;
 
@@ -113,6 +215,7 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
 
   const handleScroll = (e: any) => {
     const offsetX = e.nativeEvent.contentOffset.x;
+    scrollOffsetRef.current = offsetX;
     const dayIndex = Math.round(offsetX / (DayColumnWidth + Spacing.md));
     setActiveDayIndex(Math.max(0, Math.min(dayIndex, currentPlan.days.length - 1)));
   };
@@ -164,15 +267,33 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
               key={dayPlan.day}
               dayPlan={dayPlan}
               travelSegments={currentPlan.travelSegments}
-              onCardPress={(a) => setSelectedActivity(a)}
-              onCardLongPress={handleCardLongPress}
+              onCardPress={(a) => { if (!isDraggingRef.current) setSelectedActivity(a); }}
+              onCardLongPress={(a) => { if (!isDraggingRef.current) handleCardLongPress(a); }}
               onCardFlickDown={(a) => moveCardToDock(a.id)}
-              onCardDrop={(actId) => moveCardToDay(actId, dayPlan.day)}
+              isDragTarget={dragDisplay !== null && hoverDayIndex === idx}
+              draggingActivityId={dragDisplay?.activity.id}
               isActive={idx === useAuraStore.getState().activeDayIndex}
             />
           ))}
         </ScrollView>
       </SafeAreaView>
+
+      {/* Floating drag card – follows cursor, pointer-events:none so columns below receive hover */}
+      {dragDisplay && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: dragDisplay.x - CardDimensions.width / 2,
+            top: dragDisplay.y - CardDimensions.height * 0.3,
+            zIndex: 9999,
+            opacity: 0.9,
+            transform: [{ rotate: '3deg' }],
+          }}
+        >
+          <ActivityCard activity={dragDisplay.activity} onPress={() => {}} />
+        </View>
+      )}
 
       {/* The Dock */}
       <Dock
