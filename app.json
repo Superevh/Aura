@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Aura",
+    "slug": "aura-travel-planner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aura.travelplanner",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Aura needs photo access to save your gallery guides.",
+        "NSCameraUsageDescription": "Aura uses the camera to let you photograph custom locations."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0A0A0F",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "package": "com.aura.travelplanner",
+      "permissions": [
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-blur",
+        {}
+      ]
+    ],
+    "extra": {
+      "openaiApiKey": "$EXPO_PUBLIC_OPENAI_API_KEY",
+      "googlePlacesApiKey": "$EXPO_PUBLIC_GOOGLE_PLACES_API_KEY",
+      "unsplashAccessKey": "$EXPO_PUBLIC_UNSPLASH_ACCESS_KEY"
+    }
+  }
+}
