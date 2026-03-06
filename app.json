@@ -34,11 +34,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font",
-      [
-        "expo-blur",
-        {}
-      ]
+      "expo-font"
     ],
     "extra": {
       "openaiApiKey": "$EXPO_PUBLIC_OPENAI_API_KEY",
