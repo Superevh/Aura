@@ -28,7 +28,7 @@ interface TimelineScreenProps {
 }
 
 export function TimelineScreen({ onBack }: TimelineScreenProps) {
-  const { currentPlan, moveCardToDock, moveCardToDay, addCustomActivity, savePlanToVault, setActiveDayIndex } =
+  const { currentPlan, moveCardToDock, moveCardToDay, reorderWithinDay, addCustomActivity, savePlanToVault, setActiveDayIndex } =
     useAuraStore();
 
   const scrollRef = useRef<ScrollView>(null);
@@ -50,6 +50,32 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
   const handleMoveCardToDock = () => {
     if (!selectedActivity) return;
     moveCardToDock(selectedActivity.id);
+    setSelectedActivity(null);
+  };
+
+  // Derive current day/index for the selected activity
+  const selectedDayPlan = selectedActivity
+    ? currentPlan?.days.find((d) => d.activities.some((a) => a.id === selectedActivity.id)) ?? null
+    : null;
+  const selectedIndex = selectedDayPlan
+    ? selectedDayPlan.activities.findIndex((a) => a.id === selectedActivity?.id)
+    : -1;
+
+  const handleMoveUp = () => {
+    if (!selectedDayPlan || selectedIndex <= 0) return;
+    reorderWithinDay(selectedDayPlan.day, selectedIndex, selectedIndex - 1);
+    setSelectedActivity(null);
+  };
+
+  const handleMoveDown = () => {
+    if (!selectedDayPlan || selectedIndex < 0 || selectedIndex >= selectedDayPlan.activities.length - 1) return;
+    reorderWithinDay(selectedDayPlan.day, selectedIndex, selectedIndex + 1);
+    setSelectedActivity(null);
+  };
+
+  const handleMoveToDay = (targetDay: number) => {
+    if (!selectedActivity) return;
+    moveCardToDay(selectedActivity.id, targetDay);
     setSelectedActivity(null);
   };
 
@@ -170,6 +196,43 @@ export function TimelineScreen({ onBack }: TimelineScreenProps) {
               <>
                 <Text style={styles.actionTitle}>{selectedActivity.title}</Text>
                 <Text style={styles.actionDistrict}>{selectedActivity.district}</Text>
+
+                {/* Reorder within day */}
+                {selectedDayPlan && (
+                  <View style={styles.moveRow}>
+                    <TouchableOpacity
+                      style={[styles.moveButton, selectedIndex <= 0 && styles.moveButtonDisabled]}
+                      onPress={handleMoveUp}
+                      disabled={selectedIndex <= 0}
+                    >
+                      <Text style={styles.moveButtonText}>↑ Move Up</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.moveButton, selectedIndex >= selectedDayPlan.activities.length - 1 && styles.moveButtonDisabled]}
+                      onPress={handleMoveDown}
+                      disabled={selectedIndex >= selectedDayPlan.activities.length - 1}
+                    >
+                      <Text style={styles.moveButtonText}>↓ Move Down</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Move to another day */}
+                {currentPlan && currentPlan.days.length > 1 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayPickerScroll}>
+                    {currentPlan.days
+                      .filter((d) => d.day !== selectedDayPlan?.day)
+                      .map((d) => (
+                        <TouchableOpacity
+                          key={d.day}
+                          style={styles.dayChip}
+                          onPress={() => handleMoveToDay(d.day)}
+                        >
+                          <Text style={styles.dayChipText}>→ Day {d.day}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                )}
 
                 <TouchableOpacity style={styles.actionButton} onPress={handleMoveCardToDock}>
                   <Text style={styles.actionButtonText}>Park in Dock</Text>
@@ -365,5 +428,43 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: Colors.ivory,
     fontSize: 15,
+  },
+  moveRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  moveButton: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: Radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.fog,
+  },
+  moveButtonDisabled: {
+    opacity: 0.3,
+  },
+  moveButtonText: {
+    color: Colors.ivory,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  dayPickerScroll: {
+    flexGrow: 0,
+  },
+  dayChip: {
+    backgroundColor: 'rgba(100,100,255,0.15)',
+    borderRadius: Radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(100,100,255,0.3)',
+  },
+  dayChipText: {
+    color: Colors.ivory,
+    fontSize: 13,
+    fontWeight: '500',
   },
 });
